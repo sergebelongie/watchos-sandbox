@@ -12,6 +12,7 @@
             --text-secondary: #8e8e93;
             --accent-orange: #ff9500;
             --accent-blue: #0a84ff;
+            --accent-red: #ff453a;
             --border-color: #2c2c2e;
         }
 
@@ -65,7 +66,7 @@
             font-weight: 600;
         }
 
-        select, input {
+        select {
             width: 100%;
             padding: 10px 12px;
             background: #2c2c2e;
@@ -77,7 +78,7 @@
             margin-bottom: 12px;
         }
 
-        select:focus, input:focus {
+        select:focus {
             outline: none;
             border-color: var(--accent-blue);
         }
@@ -142,6 +143,13 @@
             font-size: 0.75rem;
             color: var(--text-secondary);
         }
+
+        .live-tag {
+            font-size: 0.65rem;
+            color: #30d158;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
     </style>
 </head>
 <body>
@@ -161,9 +169,6 @@
                 <option value="gps">Use Browser Location (GPS)</option>
             </select>
 
-            <label for="apiKey">Rejseplanen API Key (Optional)</label>
-            <input type="password" id="apiKey" placeholder="Paste your API Key here" onchange="saveKey()">
-
             <div>
                 <span class="subtitle">Nearest Detected Station:</span><br>
                 <div class="station-badge" id="detectedStation">Calculating...</div>
@@ -171,12 +176,12 @@
         </div>
 
         <div class="trip-grid" id="tripResults">
-            <!-- Departure cards will render here dynamically -->
+            <!-- Live departures will render here dynamically -->
         </div>
     </div>
 
     <script>
-        // Station coordinates and IDs
+        // Station coordinates and Rejseplanen IDs
         const STATIONS = {
             ordrup: { name: "Ordrup St.", id: "008600053", lat: 55.7624, lon: 12.5801 },
             norreport: { name: "Nørreport St.", id: "008600626", lat: 55.6831, lon: 12.5715 },
@@ -186,15 +191,14 @@
 
         // Your 6 primary trip routes
         const TRIPS = [
-            { from: "ordrup", to: "Nørreport", line: "C" },
-            { from: "norreport", to: "Ordrup", line: "C" },
-            { from: "norreport", to: "Holbæk", line: "Re" },
-            { from: "holbaek", to: "Nørreport", line: "Re" },
-            { from: "holbaek", to: "Asnæs", line: "R510" },
-            { from: "asnaes", to: "Holbæk", line: "R510" }
+            { from: "ordrup", to: "Nørreport", directionKeyword: "København", line: "C" },
+            { from: "norreport", to: "Ordrup", directionKeyword: "Klampenborg", line: "C" },
+            { from: "norreport", to: "Holbæk", directionKeyword: "Holbæk", line: "Re" },
+            { from: "holbaek", to: "Nørreport", directionKeyword: "København", line: "Re" },
+            { from: "holbaek", to: "Asnæs", directionKeyword: "Nykøbing", line: "R510" },
+            { from: "asnaes", to: "Holbæk", directionKeyword: "Holbæk", line: "R510" }
         ];
 
-        // Distance formula between two GPS coordinates in km
         function getDistanceKm(lat1, lon1, lat2, lon2) {
             const R = 6371;
             const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -229,7 +233,7 @@
                             const nearestKey = findNearestStation(pos.coords.latitude, pos.coords.longitude);
                             renderDepartures(nearestKey);
                         },
-                        err => {
+                        () => {
                             alert("Could not access GPS. Defaulting to Nørreport.");
                             renderDepartures("norreport");
                         }
@@ -243,45 +247,70 @@
             }
         }
 
-        function renderDepartures(stationKey) {
+        async function fetchLiveDepartures(stationId) {
+            try {
+                const url = `https://xmlopen.rejseplanen.dk/bin/rest.exe/departureBoard?id=${stationId}&useBus=1&format=json`;
+                const res = await fetch(url);
+                const data = await res.json();
+                
+                // Rejseplanen API returns single item as Object or multiple items as Array
+                let departures = data.DepartureBoard?.Departure || [];
+                if (!Array.isArray(departures)) {
+                    departures = [departures];
+                }
+                return departures;
+            } catch (err) {
+                console.error("Error fetching Rejseplanen data:", err);
+                return null;
+            }
+        }
+
+        async function renderDepartures(stationKey) {
             const station = STATIONS[stationKey];
             document.getElementById("detectedStation").innerText = `${station.name} (${station.id})`;
 
-            const relevantTrips = TRIPS.filter(t => t.from === stationKey);
             const container = document.getElementById("tripResults");
+            container.innerHTML = `<div class="subtitle" style="text-align:center; padding: 20px;">Fetching live train data...</div>`;
+
+            const relevantTrips = TRIPS.filter(t => t.from === stationKey);
+            const liveDepartures = await fetchLiveDepartures(station.id);
+
             container.innerHTML = "";
 
+            if (!liveDepartures || liveDepartures.length === 0) {
+                container.innerHTML = `<div class="subtitle" style="text-align:center; color: var(--accent-red);">Unable to load live departures.</div>`;
+                return;
+            }
+
             relevantTrips.forEach(trip => {
-                // Placeholder mock departure time (simulates live API response)
-                const mockTime = new Date(Date.now() + Math.floor(Math.random() * 15 + 2) * 60000);
-                const timeString = mockTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                // Find matching departure heading towards destination
+                const match = liveDepartures.find(dep => 
+                    dep.direction && dep.direction.toLowerCase().includes(trip.directionKeyword.toLowerCase())
+                ) || liveDepartures[0]; // fallback to first departure if exact direction match fails
+
+                // Priority: Real-time updated time (rtTime) vs Scheduled time (time)
+                const depTime = match.rtTime || match.time || "--:--";
+                const lineName = match.name || trip.line;
+                const trackInfo = match.track ? `Track ${match.track}` : 'Tap to refresh';
 
                 const card = document.createElement("div");
                 card.className = "trip-card";
+                card.onclick = () => renderDepartures(stationKey);
                 card.innerHTML = `
                     <div class="trip-info">
                         <h3>${trip.to}</h3>
-                        <span class="trip-line ${trip.line}">${trip.line}</span>
+                        <span class="trip-line ${trip.line}">${lineName}</span>
                     </div>
                     <div class="trip-time">
-                        <div class="time-main">${timeString}</div>
-                        <div class="time-sub">Tap to refresh</div>
+                        <div class="time-main">${depTime}</div>
+                        <div class="time-sub">${trackInfo} <span class="live-tag">• LIVE</span></div>
                     </div>
                 `;
                 container.appendChild(card);
             });
         }
 
-        function saveKey() {
-            const key = document.getElementById("apiKey").value;
-            localStorage.setItem("rejseplanen_key", key);
-        }
-
-        window.onload = () => {
-            const savedKey = localStorage.getItem("rejseplanen_key");
-            if (savedKey) document.getElementById("apiKey").value = savedKey;
-            updateLocation();
-        };
+        window.onload = updateLocation;
     </script>
 </body>
 </html>
