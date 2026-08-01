@@ -1,4 +1,5 @@
 {
   "message": "Hello World from the Web!",
-  "timestamp": "2026-08-01"
+  "date": "2026-08-01",
+  "weather": "21°C, Mostly Sunny"
 }
