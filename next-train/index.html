@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Next Train | Pendler Prototype</title>
+    <style>
+        :root {
+            --bg-color: #000000;
+            --card-bg: #1c1c1e;
+            --text-primary: #ffffff;
+            --text-secondary: #8e8e93;
+            --accent-orange: #ff9500;
+            --accent-blue: #0a84ff;
+            --border-color: #2c2c2e;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 440px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            margin: 0 0 4px 0;
+            font-weight: 700;
+        }
+
+        p.subtitle {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            margin: 0;
+        }
+
+        .control-panel {
+            background-color: var(--card-bg);
+            border-radius: 14px;
+            padding: 16px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border-color);
+        }
+
+        label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 600;
+        }
+
+        select, input {
+            width: 100%;
+            padding: 10px 12px;
+            background: #2c2c2e;
+            border: 1px solid #3a3a3c;
+            border-radius: 8px;
+            color: white;
+            font-size: 0.95rem;
+            box-sizing: border-box;
+            margin-bottom: 12px;
+        }
+
+        select:focus, input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+
+        .station-badge {
+            display: inline-block;
+            background-color: rgba(10, 132, 255, 0.15);
+            color: var(--accent-blue);
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-top: 4px;
+        }
+
+        .trip-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .trip-card {
+            background-color: var(--card-bg);
+            border-radius: 14px;
+            padding: 16px;
+            border: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .trip-info h3 {
+            margin: 0 0 6px 0;
+            font-size: 1.1rem;
+        }
+
+        .trip-line {
+            display: inline-block;
+            background: #3a3a3c;
+            color: #fff;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: bold;
+        }
+
+        .trip-line.C { background-color: #e04000; }
+        .trip-line.Re { background-color: #5856d6; }
+        .trip-line.R510 { background-color: #ff9500; }
+
+        .trip-time {
+            text-align: right;
+        }
+
+        .time-main {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: var(--accent-orange);
+        }
+
+        .time-sub {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚄 Next Train</h1>
+            <p class="subtitle">Location-Aware Pendler Prototype</p>
+        </header>
+
+        <div class="control-panel">
+            <label for="locationSelect">Current Location Input</label>
+            <select id="locationSelect" onchange="updateLocation()">
+                <option value="ordrup">Near Ordrup Station</option>
+                <option value="norreport">Near Nørreport Station</option>
+                <option value="holbaek">Near Holbæk Station</option>
+                <option value="asnaes">Near Asnæs Station</option>
+                <option value="gps">Use Browser Location (GPS)</option>
+            </select>
+
+            <label for="apiKey">Rejseplanen API Key (Optional)</label>
+            <input type="password" id="apiKey" placeholder="Paste your API Key here" onchange="saveKey()">
+
+            <div>
+                <span class="subtitle">Nearest Detected Station:</span><br>
+                <div class="station-badge" id="detectedStation">Calculating...</div>
+            </div>
+        </div>
+
+        <div class="trip-grid" id="tripResults">
+            <!-- Departure cards will render here dynamically -->
+        </div>
+    </div>
+
+    <script>
+        // Station coordinates and IDs
+        const STATIONS = {
+            ordrup: { name: "Ordrup St.", id: "008600053", lat: 55.7624, lon: 12.5801 },
+            norreport: { name: "Nørreport St.", id: "008600626", lat: 55.6831, lon: 12.5715 },
+            holbaek: { name: "Holbæk St.", id: "008600037", lat: 55.7171, lon: 11.7163 },
+            asnaes: { name: "Asnæs St.", id: "008600121", lat: 55.8116, lon: 11.5036 }
+        };
+
+        // Your 6 primary trip routes
+        const TRIPS = [
+            { from: "ordrup", to: "Nørreport", line: "C" },
+            { from: "norreport", to: "Ordrup", line: "C" },
+            { from: "norreport", to: "Holbæk", line: "Re" },
+            { from: "holbaek", to: "Nørreport", line: "Re" },
+            { from: "holbaek", to: "Asnæs", line: "R510" },
+            { from: "asnaes", to: "Holbæk", line: "R510" }
+        ];
+
+        // Distance formula between two GPS coordinates in km
+        function getDistanceKm(lat1, lon1, lat2, lon2) {
+            const R = 6371;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+
+        function findNearestStation(userLat, userLon) {
+            let nearest = null;
+            let minDistance = Infinity;
+
+            for (const key in STATIONS) {
+                const st = STATIONS[key];
+                const dist = getDistanceKm(userLat, userLon, st.lat, st.lon);
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    nearest = key;
+                }
+            }
+            return nearest;
+        }
+
+        function updateLocation() {
+            const select = document.getElementById("locationSelect").value;
+            if (select === "gps") {
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        pos => {
+                            const nearestKey = findNearestStation(pos.coords.latitude, pos.coords.longitude);
+                            renderDepartures(nearestKey);
+                        },
+                        err => {
+                            alert("Could not access GPS. Defaulting to Nørreport.");
+                            renderDepartures("norreport");
+                        }
+                    );
+                } else {
+                    alert("GPS not supported by browser.");
+                    renderDepartures("norreport");
+                }
+            } else {
+                renderDepartures(select);
+            }
+        }
+
+        function renderDepartures(stationKey) {
+            const station = STATIONS[stationKey];
+            document.getElementById("detectedStation").innerText = `${station.name} (${station.id})`;
+
+            const relevantTrips = TRIPS.filter(t => t.from === stationKey);
+            const container = document.getElementById("tripResults");
+            container.innerHTML = "";
+
+            relevantTrips.forEach(trip => {
+                // Placeholder mock departure time (simulates live API response)
+                const mockTime = new Date(Date.now() + Math.floor(Math.random() * 15 + 2) * 60000);
+                const timeString = mockTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                const card = document.createElement("div");
+                card.className = "trip-card";
+                card.innerHTML = `
+                    <div class="trip-info">
+                        <h3>${trip.to}</h3>
+                        <span class="trip-line ${trip.line}">${trip.line}</span>
+                    </div>
+                    <div class="trip-time">
+                        <div class="time-main">${timeString}</div>
+                        <div class="time-sub">Tap to refresh</div>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function saveKey() {
+            const key = document.getElementById("apiKey").value;
+            localStorage.setItem("rejseplanen_key", key);
+        }
+
+        window.onload = () => {
+            const savedKey = localStorage.getItem("rejseplanen_key");
+            if (savedKey) document.getElementById("apiKey").value = savedKey;
+            updateLocation();
+        };
+    </script>
+</body>
+</html>
