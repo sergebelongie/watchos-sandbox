@@ -66,7 +66,7 @@
             font-weight: 600;
         }
 
-        select {
+        select, input {
             width: 100%;
             padding: 10px 12px;
             background: #2c2c2e;
@@ -78,7 +78,7 @@
             margin-bottom: 12px;
         }
 
-        select:focus {
+        select:focus, input:focus {
             outline: none;
             border-color: var(--accent-blue);
         }
@@ -151,6 +151,17 @@
             font-weight: bold;
             text-transform: uppercase;
         }
+
+        .error-box {
+            color: var(--accent-red);
+            text-align: center;
+            padding: 16px;
+            font-size: 0.85rem;
+            line-height: 1.4;
+            background: rgba(255, 69, 58, 0.1);
+            border-radius: 10px;
+            border: 1px solid rgba(255, 69, 58, 0.2);
+        }
     </style>
 </head>
 <body>
@@ -170,6 +181,9 @@
                 <option value="gps">Use Browser Location (GPS)</option>
             </select>
 
+            <label for="apiKey">Rejseplanen Labs API Key</label>
+            <input type="text" id="apiKey" placeholder="Paste your API key here..." onchange="saveKey()">
+
             <div>
                 <span class="subtitle">Nearest Detected Station:</span><br>
                 <div class="station-badge" id="detectedStation">Calculating...</div>
@@ -182,7 +196,6 @@
     </div>
 
     <script>
-        // Station coordinates and Rejseplanen IDs
         const STATIONS = {
             ordrup: { name: "Ordrup St.", id: "008600053", lat: 55.7624, lon: 12.5801 },
             norreport: { name: "Nørreport St.", id: "008600626", lat: 55.6831, lon: 12.5715 },
@@ -190,7 +203,6 @@
             asnaes: { name: "Asnæs St.", id: "008600121", lat: 55.8116, lon: 11.5036 }
         };
 
-        // Your 6 primary trip routes
         const TRIPS = [
             { from: "ordrup", to: "Nørreport", directionKeyword: "København", line: "C" },
             { from: "norreport", to: "Ordrup", directionKeyword: "Klampenborg", line: "C" },
@@ -248,24 +260,34 @@
             }
         }
 
+        function saveKey() {
+            const key = document.getElementById("apiKey").value.trim();
+            localStorage.setItem("rejseplanen_key", key);
+            updateLocation();
+        }
+
         async function fetchLiveDepartures(stationId) {
+            const apiKey = localStorage.getItem("rejseplanen_key") || "";
+            if (!apiKey) {
+                return { error: "Please enter your Rejseplanen API Key in the box above to load live departures." };
+            }
+
             try {
-                const targetUrl = `https://xmlopen.rejseplanen.dk/bin/rest.exe/departureBoard?id=${stationId}&useBus=1&format=json`;
-                // Wrap request in CORS proxy for browser prototype compatibility
+                const targetUrl = `https://xmlopen.rejseplanen.dk/bin/rest.exe/departureBoard?id=${stationId}&useBus=1&format=json&accessId=${encodeURIComponent(apiKey)}`;
                 const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
                 
                 const res = await fetch(proxyUrl);
-                if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+                if (!res.ok) throw new Error(`Server returned status code ${res.status}`);
                 const data = await res.json();
                 
                 let departures = data.DepartureBoard?.Departure || [];
                 if (!Array.isArray(departures)) {
-                    departures = [departures];
+                    departures = departures ? [departures] : [];
                 }
-                return departures;
+                return { departures };
             } catch (err) {
                 console.error("Error fetching Rejseplanen data:", err);
-                return null;
+                return { error: `API Fetch Failed: ${err.message}` };
             }
         }
 
@@ -277,12 +299,19 @@
             container.innerHTML = `<div class="subtitle" style="text-align:center; padding: 20px;">Fetching live train data...</div>`;
 
             const relevantTrips = TRIPS.filter(t => t.from === stationKey);
-            const liveDepartures = await fetchLiveDepartures(station.id);
+            const result = await fetchLiveDepartures(station.id);
 
             container.innerHTML = "";
 
+            if (result.error) {
+                container.innerHTML = `<div class="error-box">${result.error}</div>`;
+                return;
+            }
+
+            const liveDepartures = result.departures;
+
             if (!liveDepartures || liveDepartures.length === 0) {
-                container.innerHTML = `<div class="subtitle" style="text-align:center; color: var(--accent-red);">Unable to load live departures.</div>`;
+                container.innerHTML = `<div class="error-box">No upcoming departures found for this station.</div>`;
                 return;
             }
 
@@ -312,7 +341,13 @@
             });
         }
 
-        window.onload = updateLocation;
+        window.onload = () => {
+            const savedKey = localStorage.getItem("rejseplanen_key");
+            if (savedKey) {
+                document.getElementById("apiKey").value = savedKey;
+            }
+            updateLocation();
+        };
     </script>
 </body>
 </html>
