@@ -108,6 +108,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            cursor: pointer;
         }
 
         .trip-info h3 {
@@ -249,11 +250,14 @@
 
         async function fetchLiveDepartures(stationId) {
             try {
-                const url = `https://xmlopen.rejseplanen.dk/bin/rest.exe/departureBoard?id=${stationId}&useBus=1&format=json`;
-                const res = await fetch(url);
+                const targetUrl = `https://xmlopen.rejseplanen.dk/bin/rest.exe/departureBoard?id=${stationId}&useBus=1&format=json`;
+                // Wrap request in CORS proxy for browser prototype compatibility
+                const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+                
+                const res = await fetch(proxyUrl);
+                if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
                 const data = await res.json();
                 
-                // Rejseplanen API returns single item as Object or multiple items as Array
                 let departures = data.DepartureBoard?.Departure || [];
                 if (!Array.isArray(departures)) {
                     departures = [departures];
@@ -283,12 +287,10 @@
             }
 
             relevantTrips.forEach(trip => {
-                // Find matching departure heading towards destination
                 const match = liveDepartures.find(dep => 
                     dep.direction && dep.direction.toLowerCase().includes(trip.directionKeyword.toLowerCase())
-                ) || liveDepartures[0]; // fallback to first departure if exact direction match fails
+                ) || liveDepartures[0];
 
-                // Priority: Real-time updated time (rtTime) vs Scheduled time (time)
                 const depTime = match.rtTime || match.time || "--:--";
                 const lineName = match.name || trip.line;
                 const trackInfo = match.track ? `Track ${match.track}` : 'Tap to refresh';
